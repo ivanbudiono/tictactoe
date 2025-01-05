@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tic-Tac-Toe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        #status {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            color: #555;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            gap: 5px;
+        }
+
+        .cell {
+            width: 100px;
+            height: 100px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 2px solid #333;
+            border-radius: 8px;
+            background-color: #fff;
+            font-size: 2rem;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.2s;
+        }
+
+        .cell:hover {
+            background-color: #e0e0e0;
+            transform: scale(1.05);
+        }
+
+        .cell.taken {
+            cursor: not-allowed;
+            background-color: #ddd;
+        }
+
+        .cell.taken:hover {
+            background-color: #ddd;
+            transform: none;
+        }
+
+        #gameContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #restart {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 1rem;
+            color: white;
+            background-color: #333;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            display: none;
+        }
+
+        #restart:hover {
+            background-color: #555;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tic-Tac-Toe</h1>
+    <div id="status">Connecting...</div>
+    <div id="gameContainer">
+        <div id="gameBoard" class="board"></div>
+        <button id="restart" onclick="restartGame()">Restart</button>
+    </div>
+
+    <script>
+        const gameBoard = document.getElementById('gameBoard');
+        const status = document.getElementById('status');
+        const restartButton = document.getElementById('restart');
+        const ws = new WebSocket('ws://localhost:8080');
+
+        let player = null;
+        let board = Array(9).fill(null);
+        let turn = 0;
+
+        ws.onopen = () => {
+            status.textContent = 'Connected to the server. Waiting for another player...';
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.error) {
+                status.textContent = data.error;
+                return;
+            }
+
+            if (data.status === 'waiting') {
+                gameBoard.style.display = 'none';
+                status.textContent = 'Looking for a player...';
+            } else if (data.status === 'playing') {
+                gameBoard.style.display = 'grid';
+                status.textContent = '';
+            }
+
+            if (data.player !== undefined) {
+                player = data.player;
+                status.textContent = `You are Player ${player === 0 ? 'X' : 'O'}`;
+            }
+
+            if (data.message) {
+                status.textContent = data.message;
+
+                if (data.message.includes("wins")) {
+                    gameBoard.style.display = 'none';
+                    restartButton.style.display = 'block';
+                    status.textContent = data.result;
+                } else if (data.message.includes("Draw")) {
+                    gameBoard.style.display = 'none';
+                    restartButton.style.display = 'block';
+                    status.textContent = 'Draw!';
+                }
+            }
+
+            if (data.board) {
+                board = data.board;
+                turn = data.turn;
+                updateBoard();
+                status.textContent = turn === player ? 'Your turn.' : 'Opponent\'s turn.';
+            }
+        };
+
+        function requestRematch() {
+            rematchButton.style.display = 'none';
+            status.textContent = 'Waiting for the opponent to rematch...';
+            ws.send(JSON.stringify({ action: 'rematch' }));
+        }
+
+        function updateBoard() {
+            gameBoard.innerHTML = '';
+            board.forEach((cell, index) => {
+                const cellDiv = document.createElement('div');
+                cellDiv.classList.add('cell');
+                if (cell !== null) {
+                    cellDiv.textContent = cell === 0 ? 'X' : 'O';
+                    cellDiv.classList.add('taken');
+                }
+                cellDiv.onclick = () => {
+                    if (cell === null && turn === player) {
+                        ws.send(index);
+                    }
+                };
+                gameBoard.appendChild(cellDiv);
+            });
+        }
+
+        function restartGame() {
+            ws.send('restart');
+            gameBoard.style.display = 'grid';
+            restartButton.style.display = 'none';
+            status.textContent = 'Game reset. Waiting for another player...';
+        }
+    </script>
+</body>
+</html>

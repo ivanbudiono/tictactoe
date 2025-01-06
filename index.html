@@ -155,6 +155,10 @@
                     playerSymbol = data.symbol;
                     document.getElementById('playerInfo').textContent = data.message;
                     break;
+
+                case 'waiting':
+                    document.getElementById('status').textContent = data.message;
+                    break;
     
                 case 'start':
                     gameActive = true;

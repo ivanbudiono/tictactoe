@@ -26,7 +26,7 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
 
         $this->broadcast([
             'type' => 'reset',
-            'message' => 'An opponent has left the game. Looking for new opponents...',
+            'message' => 'An opponent has left the game. The game will be reset',
             'gameState' => $this->gameState
         ]);
     }

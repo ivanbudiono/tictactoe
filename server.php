@@ -1,165 +1,170 @@
 <?php
-require __DIR__ . '/vendor/autoload.php';
+// server.php
+require 'vendor/autoload.php';
 
-use Ratchet\MessageComponentInterface;
-use Ratchet\ConnectionInterface;
+use Ratchet\Server\IoServer;
 use Ratchet\Http\HttpServer;
 use Ratchet\WebSocket\WsServer;
-use Ratchet\Server\IoServer;
-use React\EventLoop\Loop;
-use React\Socket\SocketServer;
 
-class TicTacToeServer implements MessageComponentInterface {
-    protected $clients;
-    private $board;
-    private $turn;
-    private $playerMap;
-    private $gameOver;
+class TicTacToeServer implements \Ratchet\MessageComponentInterface {
+    private $clients;
+    private $players;
+    private $gameState;
+    private $currentTurn;
+    private $playerSlots;
 
     public function __construct() {
         $this->clients = new \SplObjectStorage;
-        $this->board = array_fill(0, 9, null);
-        $this->turn = 0;
-        $this->playerMap = [];
-        $this->gameOver = false;
-    }
-
-    public function onOpen(ConnectionInterface $conn) {
-        if ($this->clients->count() >= 2) {
-            $conn->send(json_encode(['error' => 'Game is full!']));
-            $conn->close();
-            return;
-        }
-
-        $this->clients->attach($conn);
-        $playerId = $this->clients->count() - 1;
-        $this->playerMap[$conn->resourceId] = $playerId;
-
-        $conn->send(json_encode(['message' => 'Welcome!', 'player' => $playerId]));
-        echo "New connection: {$conn->resourceId} (Player {$playerId})\n";
-
-        if ($this->clients->count() === 2) {
-            $this->broadcast([
-                'message' => 'Game Start', 
-                'board' => $this->board, 
-                'turn' => $this->turn,
-                'status' => 'playing'
-            ]);
-        } else {
-            $conn->send(json_encode([
-                'message' => 'Waiting for an opponent...',
-                'board' => null,
-                'status' => 'waiting'
-            ]));
-        }
-    }
-
-    public function onMessage(ConnectionInterface $from, $msg) {
-        if ($msg === 'restart') {
-            $this->resetGame();
-            return;
-        }
-
-        if ($this->gameOver) {
-            $from->send(json_encode(['error' => 'Game is over! Please restart the game.']));
-            return;
-        }
-
-        $player = $this->playerMap[$from->resourceId] ?? null;
-
-        if ($player !== $this->turn) {
-            $from->send(json_encode(['error' => 'Not your turn!']));
-            return;
-        }
-
-        $index = (int)$msg;
-        if ($this->board[$index] !== null || $index < 0 || $index > 8) {
-            $from->send(json_encode(['error' => 'Invalid move!']));
-            return;
-        }
-
-        $this->board[$index] = $player;
-        $this->turn = 1 - $this->turn;
-
-        $this->broadcast(['board' => $this->board, 'turn' => $this->turn]);
-
-        if ($this->checkWin($player)) {
-            $this->gameOver = true;
-            $this->broadcast([
-                'message' => "Player {$player} wins!",
-                'gameOver' => true,
-                'result' => "Player {$player} wins!",
-                'showRematch' => true
-            ]);
-        } elseif (!in_array(null, $this->board)) {
-            $this->gameOver = true;
-            $this->broadcast([
-                'message' => 'Draw!',
-                'gameOver' => true,
-                'result' => "DRAW!",
-                'showRematch' => true
-            ]);
-        }
-    }
-
-    public function onClose(ConnectionInterface $conn) {
-        $playerId = $this->playerMap[$conn->resourceId] ?? null;
-        $this->clients->detach($conn);
-        unset($this->playerMap[$conn->resourceId]);
-
-        if ($playerId !== null) {
-            $this->broadcast(['message' => "Player {$playerId} has disconnected."]);
-        }
-
-        echo "Connection {$conn->resourceId} has disconnected\n";
-
-        if ($this->clients->count() < 2) {
-            $this->resetGame();
-            $this->broadcast([
-                'message' => 'A player has left. Game reset. Waiting for a new opponent...',
-                'board' => null,
-                'status' => 'waiting'
-            ]);
-        }
-    }
-
-    public function onError(ConnectionInterface $conn, \Exception $e) {
-        echo "An error has occurred: {$e->getMessage()}\n";
-        $conn->close();
-    }
-
-    private function broadcast($data) {
-        foreach ($this->clients as $client) {
-            $client->send(json_encode($data));
-        }
+        $this->players = [];
+        $this->playerSlots = ['X' => null, 'O' => null];
+        $this->resetGame();
     }
 
     private function resetGame() {
-        $this->board = array_fill(0, 9, null);
-        $this->turn = 0;
-        $this->gameOver = false;
+        $this->gameState = array_fill(0, 9, '');
+        $this->currentTurn = 'X';
+
         $this->broadcast([
-            'message' => 'Game reset. Waiting for another player...',
-            'board' => $this->board,
-            'turn' => $this->turn,
-            'status' => 'waiting'
+            'type' => 'reset',
+            'message' => 'An opponent has left the game. Looking for new opponents...',
+            'gameState' => $this->gameState
         ]);
     }
 
-    private function checkWin($player) {
-        $winningCombos = [
-            [0, 1, 2], [3, 4, 5], [6, 7, 8], // Horizontal
-            [0, 3, 6], [1, 4, 7], [2, 5, 8], // Vertical
-            [0, 4, 8], [2, 4, 6] // Diagonal
-        ];
+    public function onOpen(\Ratchet\ConnectionInterface $conn) {
+        $this->clients->attach($conn);
+        $assignedSymbol = null;
 
-        foreach ($winningCombos as $combo) {
-            if ($this->board[$combo[0]] === $player && $this->board[$combo[1]] === $player && $this->board[$combo[2]] === $player) {
-                return true;
+        // Assign player symbol
+        if ($this->playerSlots['X'] === null) {
+            $this->playerSlots['X'] = $conn->resourceId;
+            $assignedSymbol = 'X';
+        } elseif ($this->playerSlots['O'] === null) {
+            $this->playerSlots['O'] = $conn->resourceId;
+            $assignedSymbol = 'O';
+        }
+
+        if ($assignedSymbol !== null) {
+            $this->players[$conn->resourceId] = [
+                'conn' => $conn,
+                'symbol' => $assignedSymbol
+            ];
+
+            $conn->send(json_encode([
+                'type' => 'connect',
+                'symbol' => $assignedSymbol,
+                'message' => "You are player $assignedSymbol"
+            ]));
+
+            if (count(array_filter($this->playerSlots)) === 2) {
+                $this->broadcast([
+                    'type' => 'start',
+                    'turn' => 'X',
+                    'message' => 'Game started!'
+                ]);
+            } else {
+                $conn->send(json_encode([
+                    'type' => 'waiting',
+                    'message' => 'Waiting for an opponent...'
+                ]));
+            }
+        } else {
+            $conn->send(json_encode([
+                'type' => 'error',
+                'message' => 'Game room is full'
+            ]));
+            $conn->close();
+        }
+    }
+
+    public function onMessage(\Ratchet\ConnectionInterface $from, $msg) {
+        $data = json_decode($msg);
+    
+        if ($data->type === 'move') {
+            $player = $this->players[$from->resourceId] ?? null;
+            if ($player && $player['symbol'] === $this->currentTurn && $this->gameState[$data->position] === '') {
+                $this->gameState[$data->position] = $this->currentTurn;
+    
+                $this->broadcast([
+                    'type' => 'move',
+                    'position' => $data->position,
+                    'symbol' => $this->currentTurn
+                ]);
+    
+                if ($this->checkWin()) {
+                    $this->broadcast([
+                        'type' => 'gameOver',
+                        'winner' => $this->currentTurn,
+                    ]);
+                } elseif ($this->checkDraw()) {
+                    $this->broadcast([
+                        'type' => 'gameOver',
+                        'winner' => 'draw',
+                    ]);
+                } else {
+                    $this->currentTurn = ($this->currentTurn === 'X') ? 'O' : 'X';
+                    $this->broadcast([
+                        'type' => 'turn',
+                        'turn' => $this->currentTurn
+                    ]);
+                }
+            }
+        }
+    }    
+
+    public function onClose(\Ratchet\ConnectionInterface $conn) {
+        if (isset($this->players[$conn->resourceId])) {
+            $symbol = $this->players[$conn->resourceId]['symbol'];
+            $this->playerSlots[$symbol] = null;
+            unset($this->players[$conn->resourceId]);
+
+            $this->broadcast([
+                'type' => 'playerDisconnected',
+                'message' => "Player $symbol has disconnected. Game will reset."
+            ]);
+
+            $this->resetGame();
+
+            foreach ($this->clients as $client) {
+                $client->send(json_encode([
+                    'type' => 'waiting',
+                    'message' => 'Waiting for new players...'
+                ]));
             }
         }
 
+        $this->clients->detach($conn);
+    }
+
+    public function onError(\Ratchet\ConnectionInterface $conn, \Exception $e) {
+        $conn->close();
+    }
+
+    private function checkWin() {
+        $winPatterns = [
+            [0, 1, 2], [3, 4, 5], [6, 7, 8], // Rows
+            [0, 3, 6], [1, 4, 7], [2, 5, 8], // Columns
+            [0, 4, 8], [2, 4, 6] // Diagonals
+        ];
+
+        foreach ($winPatterns as $pattern) {
+            if ($this->gameState[$pattern[0]] !== '' &&
+                $this->gameState[$pattern[0]] === $this->gameState[$pattern[1]] &&
+                $this->gameState[$pattern[1]] === $this->gameState[$pattern[2]]) {
+                return true;
+            }
+        }
         return false;
+    }
+
+    private function checkDraw() {
+        return !in_array('', $this->gameState);
+    }
+
+    private function broadcast($message) {
+        foreach ($this->clients as $client) {
+            $client->send(json_encode($message));
+        }
     }
 }
 
@@ -172,4 +177,5 @@ $server = IoServer::factory(
     8080
 );
 
+echo "Server running at ws://127.0.0.1:8080\n";
 $server->run();

@@ -1,72 +1,107 @@
 <?php
-// server.php
 require 'vendor/autoload.php';
 
 use Ratchet\Server\IoServer;
 use Ratchet\Http\HttpServer;
 use Ratchet\WebSocket\WsServer;
+use React\EventLoop\Factory;
 
 class TicTacToeServer implements \Ratchet\MessageComponentInterface {
     private $clients;
     private $players;
     private $gameState;
     private $currentTurn;
+    private $rematchVotes;
     private $playerSlots;
+    private $rematchTimer;
+    private $rematchTimeout = 30;
+    private $waitingForRematch = null;
+    private $lastRematchVoter = null;
+    private $chatHistory = [];
+    private $gameHistory = [];
+    private $turnTimeout = 5;
 
     public function __construct() {
         $this->clients = new \SplObjectStorage;
         $this->players = [];
         $this->playerSlots = ['X' => null, 'O' => null];
         $this->resetGame();
+        $this->rematchTimer = null;
+        $this->waitingForRematch = null;
+        $this->lastRematchVoter = null;
     }
 
     private function resetGame() {
         $this->gameState = array_fill(0, 9, '');
         $this->currentTurn = 'X';
-
-        $this->broadcast([
-            'type' => 'reset',
-            'message' => 'An opponent has left the game. The game will be reset',
-            'gameState' => $this->gameState
-        ]);
+        $this->rematchVotes = ['X' => false, 'O' => false];
+        $this->chatHistory = [];
+        
+        foreach ($this->players as $player) {
+            $player['conn']->send(json_encode([
+                'type' => 'turn',
+                'turn' => $this->currentTurn,
+                'timeout' => $this->turnTimeout
+            ]));
+        }
     }
 
     public function onOpen(\Ratchet\ConnectionInterface $conn) {
-        $this->clients->attach($conn);
-        $assignedSymbol = null;
-
-        // Assign player symbol
-        if ($this->playerSlots['X'] === null) {
-            $this->playerSlots['X'] = $conn->resourceId;
-            $assignedSymbol = 'X';
-        } elseif ($this->playerSlots['O'] === null) {
-            $this->playerSlots['O'] = $conn->resourceId;
-            $assignedSymbol = 'O';
+        if ($this->playerSlots['X'] !== null && $this->playerSlots['O'] !== null) {
+            $conn->send(json_encode([
+                'type' => 'error',
+                'message' => 'Game room is full'
+            ]));
+            $conn->close();
+            return;
         }
+    
+        $this->clients->attach($conn);
+        
+        $assignedSymbol = null;
+        
+        if ($this->waitingForRematch !== null) {
+            $waitingPlayer = $this->players[$this->waitingForRematch];
+            $assignedSymbol = ($waitingPlayer['symbol'] === 'X') ? 'O' : 'X';
+            $this->playerSlots[$assignedSymbol] = $conn->resourceId;
 
+            $this->waitingForRematch = null;
+        } else {
+            if ($this->playerSlots['X'] === null) {
+                $assignedSymbol = 'X';
+                $this->playerSlots['X'] = $conn->resourceId;
+            } elseif ($this->playerSlots['O'] === null) {
+                $assignedSymbol = 'O';
+                $this->playerSlots['O'] = $conn->resourceId;
+            }
+        }
+    
         if ($assignedSymbol !== null) {
             $this->players[$conn->resourceId] = [
                 'conn' => $conn,
                 'symbol' => $assignedSymbol
             ];
-
+            
             $conn->send(json_encode([
                 'type' => 'connect',
                 'symbol' => $assignedSymbol,
                 'message' => "You are player $assignedSymbol"
             ]));
-
-            if (count(array_filter($this->playerSlots)) === 2) {
-                $this->broadcast([
-                    'type' => 'start',
-                    'turn' => 'X',
-                    'message' => 'Game started!'
-                ]);
-            } else {
-                $conn->send(json_encode([
-                    'type' => 'waiting',
-                    'message' => 'Waiting for an opponent...'
-                ]));
+    
+            if (count($this->players) === 2) {
+                $this->rematchVotes = ['X' => false, 'O' => false];
+                $this->rematchTimer = null;
+                $this->lastRematchVoter = null;
+                $this->waitingForRematch = null;
+    
+                $this->resetGame();
+                foreach ($this->players as $player) {
+                    $player['conn']->send(json_encode([
+                        'type' => 'start',
+                        'turn' => $this->currentTurn,
+                        'isFirstGame' => true
+                    ]));
+                }
             }
         } else {
             $conn->send(json_encode([
@@ -75,42 +110,167 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
             ]));
             $conn->close();
         }
+
+        // add protocol chat history
+        if (isset($this->players[$conn->resourceId])) {
+            foreach ($this->chatHistory as $chatMsg) {
+                $conn->send(json_encode($chatMsg));
+            }
+        }
     }
 
     public function onMessage(\Ratchet\ConnectionInterface $from, $msg) {
         $data = json_decode($msg);
-    
+        
+        // added protocol chat
+        // Handle chat messages
+        if ($data->type === 'chat') {
+            if (isset($this->players[$from->resourceId])) {
+                $playerSymbol = $this->players[$from->resourceId]['symbol'];
+                $chatMessage = [
+                    'type' => 'chat',
+                    'player' => $playerSymbol,
+                    'message' => $data->message,
+                    'timestamp' => date('H:i:s')
+                ];
+                
+                $this->chatHistory[] = $chatMessage;
+                
+                foreach ($this->players as $player) {
+                    $player['conn']->send(json_encode($chatMessage));
+                }
+            }
+            return;
+        }
+
+        //added protocol timeout turn
+        if ($data->type === 'turnTimeout') {
+            if (isset($this->players[$from->resourceId])) {
+                $timeoutPlayer = $this->players[$from->resourceId]['symbol'];
+                $winner = ($timeoutPlayer === 'X') ? 'O' : 'X';
+                
+                // Add timeout game to history
+                $this->addGameToHistory($winner, 'timeout');
+                
+                // End the game and notify players
+                foreach ($this->players as $player) {
+                    $player['conn']->send(json_encode([
+                        'type' => 'gameOver',
+                        'winner' => $winner,
+                        'reason' => 'timeout',
+                        'timeoutPlayer' => $timeoutPlayer,
+                        'gameHistory' => $this->gameHistory
+                    ]));
+                }
+                
+                // Reset game state
+                $this->gameState = array_fill(0, 9, '');
+                return;
+            }
+        }
+
         if ($data->type === 'move') {
-            $player = $this->players[$from->resourceId] ?? null;
-            if ($player && $player['symbol'] === $this->currentTurn && $this->gameState[$data->position] === '') {
-                $this->gameState[$data->position] = $this->currentTurn;
+            if (isset($this->players[$from->resourceId]) && 
+                $this->players[$from->resourceId]['symbol'] === $this->currentTurn) {
+                
+                if ($this->gameState[$data->position] === '') {
+                    $this->gameState[$data->position] = $this->currentTurn;
+                    
+                    foreach ($this->players as $player) {
+                        $player['conn']->send(json_encode([
+                            'type' => 'move',
+                            'position' => $data->position,
+                            'symbol' => $this->currentTurn
+                        ]));
+                    }
+
+                    if ($this->checkWin()) {
+                        // Add game result to history
+                        $this->addGameToHistory($this->currentTurn);
+                        
+                        foreach ($this->players as $player) {
+                            $player['conn']->send(json_encode([
+                                'type' => 'gameOver',
+                                'winner' => $this->currentTurn,
+                                'gameHistory' => $this->gameHistory
+                            ]));
+                        }
+                    } elseif ($this->checkDraw()) {
+                        // Add draw to history
+                        $this->addGameToHistory('draw');
+                        
+                        foreach ($this->players as $player) {
+                            $player['conn']->send(json_encode([
+                                'type' => 'gameOver',
+                                'winner' => 'draw',
+                                'gameHistory' => $this->gameHistory
+                            ]));
+                        }
+                    } else {
+                        $this->currentTurn = ($this->currentTurn === 'X') ? 'O' : 'X';
+                        foreach ($this->players as $player) {
+                            $player['conn']->send(json_encode([
+                                'type' => 'turn',
+                                'turn' => $this->currentTurn,
+                                'timeout' => $this->turnTimeout
+                            ]));
+                        }
+                    }
+                }
+            }
+        } elseif ($data->type === 'rematchVote') {
+            if ($this->lastRematchVoter !== null && !isset($this->players[$this->lastRematchVoter])) {
+                $this->lastRematchVoter = null;
+            }
+            
+            $playerSymbol = $this->players[$from->resourceId]['symbol'];
+            $this->rematchVotes[$playerSymbol] = true;
+            $this->lastRematchVoter = $from->resourceId;
+            
+            if ($this->rematchTimer === null) {
+                $this->rematchTimer = time();
+                foreach ($this->players as $player) {
+                    $player['conn']->send(json_encode([
+                        'type' => 'rematchTimerStart',
+                        'timeout' => $this->rematchTimeout
+                    ]));
+                }
+            }
+            
+            $timeElapsed = time() - $this->rematchTimer;
+            if ($timeElapsed > $this->rematchTimeout) {
+                $this->handleRematchTimeout($playerSymbol);
+                return;
+            }
+        
+            foreach ($this->players as $player) {
+                $player['conn']->send(json_encode([
+                    'type' => 'rematchVoteUpdate',
+                    'votes' => $this->rematchVotes,
+                    'timeLeft' => $this->rematchTimeout - $timeElapsed
+                ]));
+            }
     
-                $this->broadcast([
-                    'type' => 'move',
-                    'position' => $data->position,
-                    'symbol' => $this->currentTurn
-                ]);
-    
-                if ($this->checkWin()) {
-                    $this->broadcast([
-                        'type' => 'gameOver',
-                        'winner' => $this->currentTurn,
-                    ]);
-                } elseif ($this->checkDraw()) {
-                    $this->broadcast([
-                        'type' => 'gameOver',
-                        'winner' => 'draw',
-                    ]);
-                } else {
-                    $this->currentTurn = ($this->currentTurn === 'X') ? 'O' : 'X';
-                    $this->broadcast([
-                        'type' => 'turn',
+            if ($this->rematchVotes['X'] && $this->rematchVotes['O']) {
+                $this->rematchTimer = null;
+                $this->lastRematchVoter = null;
+                $this->resetGame();
+                
+                foreach ($this->players as $player) {
+                    $player['conn']->send(json_encode([
+                        'type' => 'stopRematchTimer'
+                    ]));
+                }
+                
+                foreach ($this->players as $player) {
+                    $player['conn']->send(json_encode([
+                        'type' => 'restart',
                         'turn' => $this->currentTurn
-                    ]);
+                    ]));
                 }
             }
         }
-    }    
+    }
 
     public function onClose(\Ratchet\ConnectionInterface $conn) {
         if (isset($this->players[$conn->resourceId])) {
@@ -118,21 +278,17 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
             $this->playerSlots[$symbol] = null;
             unset($this->players[$conn->resourceId]);
 
-            $this->broadcast([
-                'type' => 'playerDisconnected',
-                'message' => "Player $symbol has disconnected. Game will reset."
-            ]);
-
+            $this->chatHistory = [];
+            $this->gameHistory = [];
             $this->resetGame();
-
-            foreach ($this->clients as $client) {
-                $client->send(json_encode([
-                    'type' => 'waiting',
-                    'message' => 'Waiting for new players...'
+            
+            foreach ($this->players as $player) {
+                $player['conn']->send(json_encode([
+                    'type' => 'playerDisconnected',
+                    'reset' => true
                 ]));
             }
         }
-
         $this->clients->detach($conn);
     }
 
@@ -140,11 +296,20 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
         $conn->close();
     }
 
+    // add protocol history game
+    private function addGameToHistory($result, $reason = 'normal') {
+        $this->gameHistory[] = [
+            'result' => $result,
+            'reason' => $reason,
+            'timestamp' => date('H:i:s')
+        ];
+    }    
+
     private function checkWin() {
         $winPatterns = [
-            [0, 1, 2], [3, 4, 5], [6, 7, 8], // Rows
-            [0, 3, 6], [1, 4, 7], [2, 5, 8], // Columns
-            [0, 4, 8], [2, 4, 6] // Diagonals
+            [0, 1, 2], [3, 4, 5], [6, 7, 8],
+            [0, 3, 6], [1, 4, 7], [2, 5, 8],
+            [0, 4, 8], [2, 4, 6]
         ];
 
         foreach ($winPatterns as $pattern) {
@@ -161,13 +326,33 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
         return !in_array('', $this->gameState);
     }
 
-    private function broadcast($message) {
-        foreach ($this->clients as $client) {
-            $client->send(json_encode($message));
+    private function handleRematchTimeout($votedSymbol) {    
+        foreach ($this->players as $resourceId => $player) {
+            if ($player['symbol'] === $votedSymbol) {
+                $this->waitingForRematch = $resourceId;
+            
+                $player['conn']->send(json_encode([
+                    'type' => 'waitingForNewPlayer',
+                    'message' => 'Opponent disconnected. Waiting for new opponent...'
+                ]));
+            } else {
+                $player['conn']->send(json_encode([
+                    'type' => 'timeoutDisconnect',
+                    'message' => 'You have been disconnected due to rematch timeout'
+                ]));
+                $player['conn']->close();
+                unset($this->players[$resourceId]);
+                $this->playerSlots[$player['symbol']] = null;
+            }
         }
+
+        $this->rematchTimer = null;
+        $this->rematchVotes = ['X' => false, 'O' => false];
+        $this->lastRematchVoter = null;
     }
 }
 
+$loop = Factory::create();
 $server = IoServer::factory(
     new HttpServer(
         new WsServer(

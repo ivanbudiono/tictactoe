@@ -1,0 +1,227 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    margin: 0;
+    padding: 20px;
+}
+
+.game-container {
+    position: relative;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+.start-screen {
+    text-align: center;
+    padding: 40px;
+}
+
+.start-screen h1 {
+    color: #333;
+    margin-bottom: 30px;
+}
+
+.start-btn {
+    padding: 15px 40px;
+    font-size: 18px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.start-btn:hover {
+    background-color: #45a049;
+}
+
+.game-board {
+    display: none;
+}
+
+.board {
+    display: grid;
+    grid-template-columns: repeat(3, 100px);
+    gap: 5px;
+    margin: 20px 0;
+}
+
+.cell {
+    width: 100px;
+    height: 100px;
+    border: 2px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    cursor: pointer;
+    background-color: white;
+    transition: background-color 0.3s;
+}
+
+.cell:hover {
+    background-color: #f5f5f5;
+}
+
+.status {
+    font-size: 20px;
+    margin: 10px 0;
+    text-align: center;
+}
+
+.rematch-btn {
+    padding: 10px 20px;
+    font-size: 16px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    display: none;
+}
+
+.rematch-btn:hover {
+    background-color: #45a049;
+}
+
+.rematch-btn:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+.player-info {
+    margin: 10px 0;
+    font-weight: bold;
+}
+
+.rematch-status {
+    margin: 10px 0;
+    font-style: italic;
+    color: #666;
+}
+
+.cell.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.game-layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.chat-container {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    padding: 15px;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-container:last-child {
+    display: none;
+}
+
+.chat-messages {
+    flex-grow: 1;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+}
+
+.chat-message {
+    margin-bottom: 8px;
+    padding: 5px;
+}
+
+.chat-message .player {
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.chat-message .time {
+    color: #666;
+    font-size: 0.8em;
+}
+
+.chat-input-container {
+    display: flex;
+    gap: 10px;
+}
+
+.chat-input {
+    flex-grow: 1;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.chat-send {
+    padding: 8px 15px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.chat-send:hover {
+    background-color: #45a049;
+}
+
+.game-history {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.05);
+    padding: 10px;
+    border-radius: 5px;
+    width: 120px;
+}
+
+.game-history h4 {
+    margin: 0 0 10px 0;
+    text-align: center;
+}
+
+#historyItems {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5px;
+    text-align: center;
+}
+
+.history-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    width: 25px;
+    height: 25px;
+    border-radius: 4px;
+}
+
+.history-win {
+    color: #4CAF50;
+}
+
+.history-lose {
+    color: #f44336;
+}
+
+.history-draw {
+    color: #ffdd00;
+}

@@ -1,250 +1,50 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tic Tac Toe</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background-color: #f0f0f0;
-        }
-        
-        .game-container {
-            margin-top: 20px;
-            background-color: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        .board {
-            display: grid;
-            grid-template-columns: repeat(3, 100px);
-            gap: 5px;
-            margin: 20px 0;
-        }
-
-        .cell {
-            width: 100px;
-            height: 100px;
-            border: 2px solid #333;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 40px;
-            cursor: pointer;
-            background-color: white;
-            transition: background-color 0.3s;
-        }
-
-        .cell:hover {
-            background-color: #f5f5f5;
-        }
-
-        .status {
-            font-size: 20px;
-            margin: 10px 0;
-            text-align: center;
-        }
-
-        .rematch-btn {
-            padding: 10px 20px;
-            font-size: 16px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            display: none;
-        }
-
-        .rematch-btn:hover {
-            background-color: #45a049;
-        }
-
-        .rematch-btn:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-
-        .player-info {
-            margin: 10px 0;
-            font-weight: bold;
-        }
-
-        .rematch-status {
-            margin: 10px 0;
-            font-style: italic;
-            color: #666;
-        }
-    </style>
+    <title>Tic Tac Toe Game</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="game-container">
-        <div class="player-info" id="playerInfo">Connecting to server...</div>
-        <div class="status" id="status"></div>
-        <div class="rematch-status" id="rematchStatus"></div>
-        <div class="board" id="board">
-            <div class="cell" data-index="0"></div>
-            <div class="cell" data-index="1"></div>
-            <div class="cell" data-index="2"></div>
-            <div class="cell" data-index="3"></div>
-            <div class="cell" data-index="4"></div>
-            <div class="cell" data-index="5"></div>
-            <div class="cell" data-index="6"></div>
-            <div class="cell" data-index="7"></div>
-            <div class="cell" data-index="8"></div>
-        </div>
-        <button class="rematch-btn" id="rematchBtn">Vote for Rematch</button>
+    <div class="start-screen" id="startScreen">
+        <h1>Welcome to Tic Tac Toe</h1>
+        <button class="start-btn" id="startBtn">Start Match</button>
     </div>
 
-    <script>
-        let ws;
-        let playerSymbol;
-        let currentTurn;
-        let gameActive = false;
-        let hasVotedRematch = false;
-    
-        function init() {
-            ws = new WebSocket('ws://127.0.0.1:8080');
-            
-            ws.onopen = () => {
-                console.log('Connected to server');
-            };
-    
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                handleMessage(data);
-            };
-    
-            ws.onclose = () => {
-                document.getElementById('status').textContent = 'Connection closed';
-                gameActive = false;
-            };
-    
-            setupBoard();
-        }
-    
-        function setupBoard() {
-            const cells = document.getElementsByClassName('cell');
-            for (let cell of cells) {
-                cell.addEventListener('click', () => {
-                    if (gameActive && currentTurn === playerSymbol && cell.textContent === '') {
-                        ws.send(JSON.stringify({
-                            type: 'move',
-                            position: parseInt(cell.dataset.index)
-                        }));
-                    }
-                });
-            }
-    
-            document.getElementById('rematchBtn').addEventListener('click', () => {
-                if (!hasVotedRematch) {
-                    ws.send(JSON.stringify({ type: 'rematchVote' }));
-                    hasVotedRematch = true;
-                    document.getElementById('rematchBtn').disabled = true;
-                }
-            });
-        }
-    
-        function handleMessage(data) {
-            switch(data.type) {
-                case 'connect':
-                    playerSymbol = data.symbol;
-                    document.getElementById('playerInfo').textContent = data.message;
-                    break;
+    <div class="game-board" id="gameBoard" style="display: none;">
+        <div class="game-layout">
+            <div class="chat-container" id="chatContainer">
+                <h3>Game Chat</h3>
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input-container">
+                    <input type="text" class="chat-input" id="chatInput" placeholder="Type a message...">
+                    <button class="chat-send" id="chatSend">Send</button>
+                </div>
+            </div>
 
-                case 'waiting':
-                    document.getElementById('status').textContent = data.message;
-                    break;
-    
-                case 'start':
-                    gameActive = true;
-                    currentTurn = data.turn;
-                    updateStatus();
-                    break;
-    
-                case 'move':
-                    document.querySelector(`[data-index="${data.position}"]`).textContent = data.symbol;
-                    break;
-    
-                case 'turn':
-                    currentTurn = data.turn;
-                    updateStatus();
-                    break;
-    
-                case 'gameOver':
-                    gameActive = false;
-                    if (data.winner === 'draw') {
-                        document.getElementById('status').textContent = "Game Over - It's a Draw!";
-                    } else {
-                        document.getElementById('status').textContent = `Game Over - Player ${data.winner} Wins!`;
-                    }
-                    break;
-    
-                case 'rematchVoteUpdate':
-                    updateRematchStatus(data.votes);
-                    break;
-    
-                case 'reset':
-                    alert(data.message);
-                    resetBoard(data.gameState); // Memperbarui papan dengan data gameState
-                    break;
-    
-                case 'restart':
-                    resetBoard(); // Menggunakan fungsi reset tanpa parameter
-                    break;
-    
-                case 'error':
-                    document.getElementById('status').textContent = data.message;
-                    break;
-    
-                case 'playerDisconnected':
-                    document.getElementById('status').textContent = data.message;
-                    gameActive = false;
-                    break;
-            }
-        }
-    
-        function updateRematchStatus(votes) {
-            const rematchStatus = document.getElementById('rematchStatus');
-            const votedPlayers = Object.entries(votes)
-                .filter(([_, voted]) => voted)
-                .map(([symbol, _]) => symbol);
-            
-            if (votedPlayers.length === 0) {
-                rematchStatus.textContent = 'Waiting for players to vote for rematch...';
-            } else if (votedPlayers.length === 1) {
-                rematchStatus.textContent = `Player ${votedPlayers[0]} voted for rematch. Waiting for other player...`;
-            }
-        }
-    
-        function updateStatus() {
-            const status = document.getElementById('status');
-            if (currentTurn === playerSymbol) {
-                status.textContent = "Your turn";
-            } else {
-                status.textContent = "Opponent's turn";
-            }
-        }
-    
-        function resetBoard(gameState = Array(9).fill('')) {
-            const cells = document.querySelectorAll('.cell');
-            cells.forEach((cell, index) => {
-                cell.textContent = gameState[index];
-            });
-            gameActive = true;
-            currentTurn = 'X';
-            hasVotedRematch = false;
-            document.getElementById('rematchBtn').style.display = 'none';
-            document.getElementById('rematchBtn').disabled = false;
-            document.getElementById('rematchStatus').textContent = '';
-            updateStatus();
-        }
-    
-        init();
-    </script>    
+            <div class="game-container">
+                <div class="player-info" id="playerInfo">Connecting to server...</div>
+                <div class="status" id="status"></div>
+                <div class="rematch-status" id="rematchStatus"></div>
+                <div class="board" id="board">
+                    <div class="cell" data-index="0"></div>
+                    <div class="cell" data-index="1"></div>
+                    <div class="cell" data-index="2"></div>
+                    <div class="cell" data-index="3"></div>
+                    <div class="cell" data-index="4"></div>
+                    <div class="cell" data-index="5"></div>
+                    <div class="cell" data-index="6"></div>
+                    <div class="cell" data-index="7"></div>
+                    <div class="cell" data-index="8"></div>
+                </div>
+                <button class="rematch-btn" id="rematchBtn">Vote for Rematch</button>
+                <div class="game-history" id="gameHistory">
+                    <h4>Game History</h4>
+                    <div id="historyItems"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="tictactoe.js"></script>
 </body>
 </html>

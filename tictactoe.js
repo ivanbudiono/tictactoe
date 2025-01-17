@@ -160,9 +160,9 @@ function handleMessage(data) {
             
             if (data.reason === 'timeout') {
                 const isCurrentPlayerTimeout = data.timeoutPlayer === playerSymbol;
-                const statusMessage = isCurrentPlayerTimeout ? 
+                const statusMessage = isCurrentPlayerTimeout ?
                     "Game Over - You lost due to timeout!" :
-                    "Game Over - You won! Opponent's time ran out!";
+                    "Game Over - You won! Opponent's time ran out!" ;
                 document.getElementById('status').textContent = statusMessage;
             } else if (data.winner === 'draw') {
                 document.getElementById('status').textContent = "Game Over - It's a Draw!";
@@ -262,9 +262,9 @@ function updateGameHistory(history, playerSymbol) {
     });
 }
 
-function updateTurnTimer(timeout = TURN_TIMEOUT) {
+function updateTurnTimer(TURN_TIMEOUT) {
     clearInterval(turnTimerInterval);
-    timeLeft = parseInt(timeout) || TURN_TIMEOUT;
+    timeLeft = TURN_TIMEOUT;
 
     const statusElement = document.getElementById('status');
     const currentStatus = currentTurn === playerSymbol ? "Your turn" : "Opponent's turn";

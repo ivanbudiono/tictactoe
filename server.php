@@ -49,8 +49,7 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
     public function onOpen(\Ratchet\ConnectionInterface $conn) {
         if ($this->playerSlots['X'] !== null && $this->playerSlots['O'] !== null) {
             $conn->send(json_encode([
-                'type' => 'error',
-                'message' => 'Game room is full'
+                'type' => 'error'
             ]));
             $conn->close();
             return;
@@ -105,28 +104,19 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
             }
         } else {
             $conn->send(json_encode([
-                'type' => 'error',
-                'message' => 'Game room is full'
+                'type' => 'error'
             ]));
             $conn->close();
-        }
-
-        // add protocol chat history
-        if (isset($this->players[$conn->resourceId])) {
-            foreach ($this->chatHistory as $chatMsg) {
-                $conn->send(json_encode($chatMsg));
-            }
         }
     }
 
     public function onMessage(\Ratchet\ConnectionInterface $from, $msg) {
         $data = json_decode($msg);
         
-        // added protocol chat
-        // Handle chat messages
         if ($data->type === 'chat') {
             if (isset($this->players[$from->resourceId])) {
                 $playerSymbol = $this->players[$from->resourceId]['symbol'];
+                date_default_timezone_set('Asia/Jakarta');
                 $chatMessage = [
                     'type' => 'chat',
                     'player' => $playerSymbol,
@@ -143,27 +133,22 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
             return;
         }
 
-        //added protocol timeout turn
         if ($data->type === 'turnTimeout') {
             if (isset($this->players[$from->resourceId])) {
-                $timeoutPlayer = $this->players[$from->resourceId]['symbol'];
-                $winner = ($timeoutPlayer === 'X') ? 'O' : 'X';
+                $winner = ($this->currentTurn === 'X') ? 'O' : 'X';
                 
-                // Add timeout game to history
                 $this->addGameToHistory($winner, 'timeout');
                 
-                // End the game and notify players
                 foreach ($this->players as $player) {
                     $player['conn']->send(json_encode([
                         'type' => 'gameOver',
                         'winner' => $winner,
                         'reason' => 'timeout',
-                        'timeoutPlayer' => $timeoutPlayer,
+                        'timeoutPlayer' => $this->currentTurn,
                         'gameHistory' => $this->gameHistory
                     ]));
                 }
                 
-                // Reset game state
                 $this->gameState = array_fill(0, 9, '');
                 return;
             }
@@ -185,7 +170,6 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
                     }
 
                     if ($this->checkWin()) {
-                        // Add game result to history
                         $this->addGameToHistory($this->currentTurn);
                         
                         foreach ($this->players as $player) {
@@ -196,7 +180,6 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
                             ]));
                         }
                     } elseif ($this->checkDraw()) {
-                        // Add draw to history
                         $this->addGameToHistory('draw');
                         
                         foreach ($this->players as $player) {
@@ -296,10 +279,10 @@ class TicTacToeServer implements \Ratchet\MessageComponentInterface {
         $conn->close();
     }
 
-    // add protocol history game
-    private function addGameToHistory($result, $reason = 'normal') {
+    private function addGameToHistory($winner, $reason = 'normal') {
+        date_default_timezone_set('Asia/Jakarta');
         $this->gameHistory[] = [
-            'result' => $result,
+            'result' => $winner,
             'reason' => $reason,
             'timestamp' => date('H:i:s')
         ];

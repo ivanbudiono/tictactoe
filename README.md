@@ -28,6 +28,7 @@ php server.php
 
 4. Connect Clients
 Open the HTML file (e.g., client.html) in a browser on two different devices and make sure the WebSocket connection URL in the JavaScript matches the server IP and port.
+
 Example in JS:
 ```bash
 ws = new WebSocket('ws://127.0.0.1:8080');
